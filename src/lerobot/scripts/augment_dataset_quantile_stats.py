@@ -14,8 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-This script augments existing LeRobot datasets with quantile statistics.
+"""This script augments existing LeRobot datasets with quantile statistics.
 
 Most datasets created before the quantile feature was added do not contain
 quantile statistics (q01, q10, q50, q90, q99) in their metadata. This script:
@@ -61,7 +60,9 @@ def has_quantile_stats(stats: dict[str, dict] | None, quantile_list_keys: list[s
     """Check if dataset statistics already contain quantile information.
 
     Args:
-        stats: Dataset statistics dictionary
+        stats (`dict[str, dict] | None`): Dataset statistics, keyed by feature name.
+        quantile_list_keys (`list[str] | None`, *optional*): Quantile stat keys to check for (e.g.
+            `["q01", "q99"]`). Defaults to keys derived from `DEFAULT_QUANTILES` when unset.
 
     Returns:
         True if quantile statistics are present, False otherwise
@@ -83,10 +84,10 @@ def process_single_episode(dataset: LeRobotDataset, episode_idx: int, use_sampli
     """Process a single episode and return its statistics.
 
     Args:
-        dataset: The LeRobot dataset
-        episode_idx: Index of the episode to process
-        use_sampling: If True, sub-sample image/video frames per episode to bound
-            memory. If False, use every frame (exact, higher memory).
+        dataset (`LeRobotDataset`): Dataset the episode belongs to.
+        episode_idx (`int`): Index of the episode to process.
+        use_sampling (`bool`, *optional*, defaults to `True`): Whether to sub-sample image/video frames
+            per episode (cheaper) instead of reading every frame (exact).
 
     Returns:
         Dictionary containing episode statistics
@@ -154,9 +155,9 @@ def compute_quantile_stats_for_dataset(dataset: LeRobotDataset, use_sampling: bo
     """Compute quantile statistics for all episodes in the dataset.
 
     Args:
-        dataset: The LeRobot dataset to compute statistics for
-        use_sampling: If True, sub-sample image/video frames per episode to bound
-            memory. If False, use every frame (exact, higher memory).
+        dataset (`LeRobotDataset`): Dataset to compute statistics for.
+        use_sampling (`bool`, *optional*, defaults to `True`): Whether to sub-sample image/video frames
+            per episode (cheaper) instead of reading every frame (exact).
 
     Returns:
         Dictionary containing aggregated statistics with quantiles
@@ -214,11 +215,13 @@ def augment_dataset_with_quantile_stats(
     """Augment a dataset with quantile statistics if they are missing.
 
     Args:
-        repo_id: Repository ID of the dataset
-        root: Local root directory for the dataset
-        overwrite: Overwrite existing quantile statistics if they already exist
-        use_sampling: If True, sub-sample image/video frames per episode to bound
-            memory. If False, use every frame (exact, higher memory).
+        repo_id (`str`): Dataset identifier on the Hugging Face Hub.
+        root (`str | pathlib.Path | None`, *optional*): Local root directory for the dataset. Defaults
+            to `$HF_LEROBOT_HOME/repo_id` when unset.
+        overwrite (`bool`, *optional*, defaults to `False`): Whether to recompute and overwrite quantile
+            statistics even if they already exist.
+        use_sampling (`bool`, *optional*, defaults to `True`): Whether to sub-sample image/video frames
+            per episode (cheaper) instead of reading every frame (exact).
     """
     logging.info(f"Loading dataset: {repo_id}")
     dataset = LeRobotDataset(
