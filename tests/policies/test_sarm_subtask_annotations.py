@@ -17,13 +17,18 @@
 import pytest
 
 pytest.importorskip("transformers")
+pytest.importorskip("pandas")
+
+import pandas as pd
 
 from lerobot.data_processing.sarm_annotations.subtask_annotation import (
     Subtask,
     SubtaskAnnotation,
     Timestamp,
     compute_temporal_proportions,
+    save_annotations_to_dataset,
 )
+from lerobot.datasets.utils import DEFAULT_EPISODES_PATH
 
 
 def make_annotation(subtasks: list[tuple[str, int, int]]) -> SubtaskAnnotation:
@@ -132,3 +137,56 @@ class TestComputeTemporalProportions:
 
         for name in ["a", "b", "c", "d"]:
             assert abs(result[name] - 0.25) < 1e-6
+
+
+class TestSaveAnnotationsToDataset:
+    """Tests for save_annotations_to_dataset writing back to per-file episode parquets."""
+
+    SPARSE_NAMES_COL = "sparse_subtask_names"
+
+    def _build_dataset(self, root, file_layout: dict[tuple[int, int], list[int]]) -> None:
+        """Write a minimal v3 `meta/episodes` layout: one parquet per (chunk, file)."""
+        for (chunk_index, file_index), episode_indices in file_layout.items():
+            df = pd.DataFrame(
+                {
+                    "episode_index": episode_indices,
+                    "meta/episodes/chunk_index": [chunk_index] * len(episode_indices),
+                    "meta/episodes/file_index": [file_index] * len(episode_indices),
+                }
+            )
+            path = root / DEFAULT_EPISODES_PATH.format(chunk_index=chunk_index, file_index=file_index)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(path, engine="pyarrow")
+
+    @staticmethod
+    def _annotation(name: str) -> SubtaskAnnotation:
+        return SubtaskAnnotation(
+            subtasks=[Subtask(name=name, timestamps=Timestamp(start="00:00", end="00:01"))]
+        )
+
+    def test_annotations_written_to_correct_rows_across_files(self, tmp_path):
+        """Global episode indices must resolve to the matching row of each per-file parquet.
+
+        Regression test for #2742: the write-back indexed `file_df` with the global episode
+        index, which does not exist in the second file's local 0-based index. Under pandas that
+        silently appends phantom rows and leaves the real episode rows unannotated.
+        """
+        root = tmp_path / "dataset"
+        # File (0, 0) holds global episodes [0, 1]; file (0, 1) holds global episodes [2, 3].
+        file_layout = {(0, 0): [0, 1], (0, 1): [2, 3]}
+        self._build_dataset(root, file_layout)
+
+        annotations = {ep: self._annotation(f"ep{ep}") for ep in [0, 1, 2, 3]}
+        save_annotations_to_dataset(root, annotations, fps=10, prefix="sparse")
+
+        for (chunk_index, file_index), episode_indices in file_layout.items():
+            path = root / DEFAULT_EPISODES_PATH.format(chunk_index=chunk_index, file_index=file_index)
+            file_df = pd.read_parquet(path)
+            assert len(file_df) == len(episode_indices), (
+                f"file ({chunk_index}, {file_index}) grew phantom rows: "
+                f"{len(file_df)} != {len(episode_indices)}"
+            )
+            for ep in episode_indices:
+                row = file_df.loc[file_df["episode_index"] == ep, self.SPARSE_NAMES_COL]
+                assert len(row) == 1, f"episode {ep} missing from its own file"
+                assert row.iloc[0] == [f"ep{ep}"], f"episode {ep} annotation not written: {row.iloc[0]!r}"

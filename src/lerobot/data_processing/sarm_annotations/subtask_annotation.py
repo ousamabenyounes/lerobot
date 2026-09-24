@@ -806,19 +806,28 @@ def save_annotations_to_dataset(
                 if col not in file_df.columns:
                     file_df[col] = None
             if ep_idx in annotations:
-                for col in cols:
-                    file_df.at[ep_idx, col] = episodes_df.loc[ep_idx, col]
-                if prefix == "sparse":  # Legacy columns
-                    for i, legacy in enumerate(
-                        [
-                            "subtask_names",
-                            "subtask_start_times",
-                            "subtask_end_times",
-                            "subtask_start_frames",
-                            "subtask_end_frames",
-                        ]
-                    ):
-                        file_df.at[ep_idx, legacy] = episodes_df.loc[ep_idx, cols[i]]
+                # `file_df` is a single per-file parquet indexed by a local 0-based row
+                # position, whereas `ep_idx` is the dataset-global episode index. Locate the
+                # matching row via the `episode_index` column instead of indexing with
+                # `ep_idx` directly; the two only coincide for the first file, and using the
+                # global index elsewhere appends phantom rows and drops the real annotation
+                # (see issue #2742).
+                local_rows = file_df.index[file_df["episode_index"] == ep_idx]
+                if len(local_rows) > 0:
+                    local_idx = local_rows[0]
+                    for col in cols:
+                        file_df.at[local_idx, col] = episodes_df.loc[ep_idx, col]
+                    if prefix == "sparse":  # Legacy columns
+                        for i, legacy in enumerate(
+                            [
+                                "subtask_names",
+                                "subtask_start_times",
+                                "subtask_end_times",
+                                "subtask_start_frames",
+                                "subtask_end_frames",
+                            ]
+                        ):
+                            file_df.at[local_idx, legacy] = episodes_df.loc[ep_idx, cols[i]]
             file_df.to_parquet(path, engine="pyarrow", compression="snappy")
 
 
